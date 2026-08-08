@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Green Corridor - Maps/GPS Prototype</title>
+ 
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+ 
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; font-family: Arial, sans-serif; }
+  #map { width: 100%; height: 100vh; }
+  #panel {
+    position: absolute; top: 10px; left: 50px; z-index: 1000;
+    background: white; padding: 10px 14px; border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3); font-size: 14px;
+  }
+  #panel select, #panel button {
+    margin-top: 6px; padding: 4px 8px; width: 100%;
+  }
+</style>
+</head>
+<body>
+ 
+<div id="panel">
+  <strong>Green Corridor</strong>
+  <div>Choose destination hospital:</div>
+  <select id="hospitalSelect"></select>
+  <button onclick="drawRoute()">Find Fastest Route</button>
+  <button onclick="recenterOnAmbulance()">📍 Recenter on Ambulance</button>
+  <div id="eta" style="margin-top:6px;"></div>
+</div>
+ 
+<div id="map"></div>
+ 
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+ 
+<script>
+  // ---- CONFIG: starting map center (Ahmedabad). Change to your city's coordinates. ----
+  const CITY_CENTER = [23.22, 72.64];
+ 
+  // ---- Ambulance location now driven by live GPS ----
+  // ---- Staring with a fallback location (in case GPS is denied/unavilable)
+  let ambulance = { name: "Ambulance (Emergency Site)", lat: 23.21, lng: 72.66};
+  
+  // ---- Real hospital data for Gandhinagar, pulled once via Overpass API and hardcoded ----
+  // (No live fetch needed anymore — this avoids relying on a slow/unreliable free server during demos)
+  const hospitals = [
+    { name: "Aarohi General Hospital", healthcare: "hospital", lat: 23.1777000, lng: 72.7467970 },
+    { name: "Aashka Multispeciality Hospitals", healthcare: "hospital", lat: 23.1857862, lng: 72.6217901 },
+    { name: "Air Force Hospital", healthcare: "hospital", lat: 23.2423717, lng: 72.6955764 },
+    { name: "Amba Health Centre & Hospital", healthcare: "hospital", lat: 23.1764265, lng: 72.5753408 },
+    { name: "Amrut Arogyadham Medical Hospital", healthcare: "hospital", lat: 23.1105464, lng: 72.5849734 },
+    { name: "Anand Hospital", healthcare: "hospital", lat: 23.2088540, lng: 72.6367850 },
+    { name: "Ansh Multispeciality Hospital", healthcare: "hospital", lat: 23.1146670, lng: 72.5806610 },
+    { name: "Ashirwad Children Hospital", healthcare: "hospital", lat: 23.2291554, lng: 72.6534342 },
+    { name: "Chandkheda Orthopedic & Surgical Hospital", healthcare: "hospital", lat: 23.1137050, lng: 72.5830960 },
+    { name: "Civil Hospital", healthcare: "hospital", lat: 23.2196609, lng: 72.6418450 },
+    { name: "Devarshi Super Speciality Hospital", healthcare: "hospital", lat: 23.1221050, lng: 72.5820520 },
+    { name: "ESIC Hospital", healthcare: "hospital", lat: 23.2305050, lng: 72.6522280 },
+    { name: "Gayathri Hospital, Ahmedabad", healthcare: "hospital", lat: 23.1018186, lng: 72.6659513 },
+    { name: "Gayatri Hospital, Gandhinagar", healthcare: "hospital", lat: 23.2127432, lng: 72.6299769 },
+    { name: "GEB Hospital", healthcare: "hospital", lat: 23.2557500, lng: 72.6706340 },
+    { name: "Government hospital Adalaj", healthcare: "hospital", lat: 23.1677030, lng: 72.5857745 },
+    { name: "Government Hospital Sector 22", healthcare: "hospital", lat: 23.2344371, lng: 72.6585925 },
+    { name: "Government Hospital Sector-3A", healthcare: "hospital", lat: 23.2016490, lng: 72.6278940 },
+    { name: "Government Hospital, Sector 17", healthcare: "hospital", lat: 23.2303964, lng: 72.6538077 },
+    { name: "Harjivan Hospital", healthcare: "hospital", lat: 23.2569380, lng: 72.6336330 },
+    { name: "Health Center", healthcare: "hospital", lat: 23.1039413, lng: 72.5679365 },
+    { name: "Hi Tech Hospital", healthcare: "hospital", lat: 23.2054057, lng: 72.6336991 },
+    { name: "Ila Maternity Hospital - Gandhinagar", healthcare: "hospital", lat: 23.2318942, lng: 72.6500317 },
+    { name: "Jalaram Hospital", healthcare: "hospital", lat: 23.2112394, lng: 72.6365927 },
+    { name: "Jeevan Hospital", healthcare: "hospital", lat: 23.2088303, lng: 72.6436861 },
+    { name: "Kalp Children Hospital", healthcare: "hospital", lat: 23.2151990, lng: 72.6421536 },
+    { name: "Kalrav Children Hospital, Gandhinagar", healthcare: "hospital", lat: 23.2321814, lng: 72.6539639 },
+    { name: "Krishana Hospital, Gandhinagar", healthcare: "hospital", lat: 23.2219327, lng: 72.7287599 },
+    { name: "Life Apollo Hospitals", healthcare: "hospital", lat: 23.1926044, lng: 72.6385544 },
+    { name: "Lotus Multispeciality Hospital", healthcare: "hospital", lat: 23.1044464, lng: 72.6025578 },
+    { name: "Mahi Surgical Hospital, Bayad", healthcare: "hospital", lat: 23.2241535, lng: 72.7299522 },
+    { name: "Mahi Surgical Hospital, Chiloda", healthcare: "hospital", lat: 23.2193720, lng: 72.7262030 },
+    { name: "Mamta Children Hospital, Gandhinagar", healthcare: "hospital", lat: 23.2448913, lng: 72.6493518 },
+    { name: "Mann Hospital", healthcare: "hospital", lat: 23.2151883, lng: 72.6411340 },
+    { name: "Mukund Eye Hospital", healthcare: "hospital", lat: 23.2157197, lng: 72.6491037 },
+    { name: "Navjivan Hospital", healthcare: "hospital", lat: 23.1149430, lng: 72.5815450 },
+    { name: "Navjivan Hospital, Gandhinagar", healthcare: "hospital", lat: 23.2149386, lng: 72.6406256 },
+    { name: "Navodaya Hospital for Neonates and Children", healthcare: "hospital", lat: 23.1112092, lng: 72.5847083 },
+    { name: "Netra Jyoti Eye and Ent Hospital", healthcare: "hospital", lat: 23.1093376, lng: 72.5885050 },
+    { name: "NeuroPanch Ayurved Hospital", healthcare: "hospital", lat: 23.2298197, lng: 72.6668181 },
+    { name: "Niky Hospital", healthcare: "hospital", lat: 23.2464106, lng: 72.6606658 },
+    { name: "Nitaben Shekhat Hospital", healthcare: "hospital", lat: 23.2152171, lng: 72.6423782 },
+    { name: "Om Prasuti Gruha Hospital", healthcare: "hospital", lat: 23.1616888, lng: 72.5871116 },
+    { name: "Pagarav Multi Speciality Hospital & ICU", healthcare: "hospital", lat: 23.2439097, lng: 72.6512288 },
+    { name: "Param Multispeciality Hospital", healthcare: "hospital", lat: 23.1047391, lng: 72.5976157 },
+    { name: "Prathna Maternity Home", healthcare: "hospital", lat: 23.2089870, lng: 72.6367960 },
+    { name: "Pushp Hospital and Maternity Home", healthcare: "hospital", lat: 23.1143320, lng: 72.5787690 },
+    { name: "Pushpa Children Hospital and Neonatal Care", healthcare: "hospital", lat: 23.1067781, lng: 72.5980747 },
+    { name: "Pushpam Hospital, Ahmedabad", healthcare: "hospital", lat: 23.1029936, lng: 72.5697277 },
+    { name: "Radhe Children Hospital", healthcare: "hospital", lat: 23.2062010, lng: 72.6341167 },
+    { name: "Radhe Hospital", healthcare: "hospital", lat: 23.1817847, lng: 72.6280818 },
+    { name: "Raj Maternity Home", healthcare: "hospital", lat: 23.2048436, lng: 72.6412383 },
+    { name: "Rhythm Heart and Medical Hospital", healthcare: "hospital", lat: 23.1133880, lng: 72.5831820 },
+    { name: "Sanidhya Multi Speciality Hospital & Trauma Centre", healthcare: "hospital", lat: 23.2661210, lng: 72.6685280 },
+    { name: "Sanjivani Babycare Hospital", healthcare: "hospital", lat: 23.1793680, lng: 72.6334250 },
+    { name: "Sanjivani Children Hospital", healthcare: "hospital", lat: 23.2085838, lng: 72.6366046 },
+    { name: "Sanjivani Heart And Medical Hospital - Gandhinagar", healthcare: "hospital", lat: 23.1924861, lng: 72.6132895 },
+    { name: "Sanjivani Hospital, Gandhinagar", healthcare: "hospital", lat: 23.2324833, lng: 72.6686785 },
+    { name: "Sarkari Ayurved Hospital", healthcare: "hospital", lat: 23.2363356, lng: 72.6541825 },
+    { name: "Satyam Children Hospital", healthcare: "hospital", lat: 23.1148697, lng: 72.5838657 },
+    { name: "Satyamev Hospital", healthcare: "hospital", lat: 23.1204422, lng: 72.5815442 },
+    { name: "Sentara Multispeciality Hospital", healthcare: "hospital", lat: 23.1125242, lng: 72.5834513 },
+    { name: "Shashvat Hospital", healthcare: "hospital", lat: 23.2045854, lng: 72.6331660 },
+    { name: "Sheth N.N Saravajanik Hospital", healthcare: "hospital", lat: 23.2905947, lng: 72.6354170 },
+    { name: "Shilp E.N.T Clinic and Hospital", healthcare: "hospital", lat: 23.1089581, lng: 72.5930405 },
+    { name: "Shivam Surgical and Dental Hospital", healthcare: "hospital", lat: 23.1145830, lng: 72.5828270 },
+    { name: "Shraddha Bhakti Maternity Hospital", healthcare: "hospital", lat: 23.2072340, lng: 72.6357910 },
+    { name: "Shree Rajratan General & Surgical Hospital", healthcare: "hospital", lat: 23.2118970, lng: 72.6393050 },
+    { name: "Shree Ratanraj General Hospital", healthcare: "hospital", lat: 23.2453065, lng: 72.6472550 },
+    { name: "Shree Sai Children Hospital", healthcare: "hospital", lat: 23.1146062, lng: 72.5838912 },
+    { name: "Shreyas Orthopedic Hospital, Ahmedabad", healthcare: "hospital", lat: 23.1154284, lng: 72.5822818 },
+    { name: "Shubham Maternity Hospital", healthcare: "hospital", lat: 23.2079300, lng: 72.6466970 },
+    { name: "Shyam Maternity Hospital", healthcare: "hospital", lat: 23.2468343, lng: 72.6470661 },
+    { name: "SMVS Swaminarayan Hospital", healthcare: "hospital", lat: 23.1773832, lng: 72.6410612 },
+    { name: "Starling Hospital", healthcare: "hospital", lat: 23.1814260, lng: 72.7001560 },
+    { name: "Tej Eye Centre Superspeciality Eye Hospital", healthcare: "hospital", lat: 23.2107329, lng: 72.6364620 },
+    { name: "Tejas Surgical Hospital", healthcare: "hospital", lat: 23.2153340, lng: 72.6422150 },
+    { name: "Ukti Maternity Hospital", healthcare: "hospital", lat: 23.2355099, lng: 72.6599674 },
+    { name: "Urmi Hospital", healthcare: "hospital", lat: 23.2435941, lng: 72.6517603 },
+    { name: "Urvi Maternity Hospital", healthcare: "hospital", lat: 23.2329639, lng: 72.6591412 },
+    { name: "Utkarsh Hospital, Ahmedabad", healthcare: "hospital", lat: 23.1078991, lng: 72.5783663 },
+    { name: "Vachhani Hospital", healthcare: "hospital", lat: 23.1794070, lng: 72.6340870 },
+    { name: "Vinayak Orthopaedic Hospital, Pathika S.T. Stand", healthcare: "hospital", lat: 23.2150357, lng: 72.6428381 },
+    { name: "Vishwas Kamdhenu Panchgavya Aarogya Hospital", healthcare: "hospital", lat: 23.1691147, lng: 72.6129583 },
+    { name: "Yashdeep Eye & Children Hospital", healthcare: "hospital", lat: 23.2088970, lng: 72.6367150 },
+    { name: "Yashdeep Heart and Medical Hospital", healthcare: "hospital", lat: 23.2327889, lng: 72.6585478 },
+];
+
+// ---- Network status detection ----
+  window.addEventListener('offline', () => {
+    document.getElementById('eta').textContent = "⚠️ No internet connection — live routing unavailable.";
+  });
+  window.addEventListener('online', () => {
+    document.getElementById('eta').textContent = "Back online.";
+  });
+
+  // hospitals starts empty — it gets filled in once Overpass responds
+  //let hospitals = [];
+ 
+  // ---- Initialize map ----
+  const map = L.map('map').setView(CITY_CENTER, 13);
+ 
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+ 
+  // ---- Custom icons (keeps hospital vs ambulance visually distinct, no clutter) ----
+  const hospitalIcon = L.divIcon({
+    html: '📍', className: '', iconSize: [28, 28], iconAnchor: [14, 14]
+  });
+  const ambulanceIcon = L.divIcon({
+    html: '🔵', className: '', iconSize: [28, 28], iconAnchor: [14, 14]
+  });
+ 
+  // ---- Add ambulance marker ----
+  const ambulanceMarker = L.marker([ambulance.lat,ambulance.lng], { icon: ambulanceIcon })
+    .addTo(map)
+    .bindPopup(ambulance.name);
+
+  // ---- Live GPS tracking ----
+  // ---- Live GPS tracking ----
+  let hasLocatedOnce = false;
+
+  if (navigator.geolocation) {
+    navigator.geolocation.watchPosition(
+      (position) => {
+        ambulance.lat = position.coords.latitude;
+        ambulance.lng = position.coords.longitude;
+        ambulanceMarker.setLatLng([ambulance.lat, ambulance.lng]);
+
+        if (!hasLocatedOnce) {
+          hasLocatedOnce = true;
+          autoSelectNearestHospital(); // now runs with the REAL GPS position, not the fallback
+        }
+      },
+      (error) => {
+        console.warn("GPS unavailable, using fallback location:", error);
+        document.getElementById('eta').textContent = "GPS unavailable — using default location.";
+        if (!hasLocatedOnce) {
+          hasLocatedOnce = true;
+          autoSelectNearestHospital(); // fall back gracefully if GPS is denied
+        }
+      },
+      { enableHighAccuracy: true }
+    );
+  } else {
+    autoSelectNearestHospital(); // no geolocation support at all — use fallback location
+  }
+
+  // ---- Add hospital markers + populate dropdown ----
+  const select = document.getElementById('hospitalSelect');
+  const markerGroup = L.featureGroup(); // collects all markers so we can auto-zoom to fit them
+ 
+  hospitals.forEach((h, i) => {
+    const marker = L.marker([h.lat, h.lng], { icon: hospitalIcon })
+      .addTo(map)
+      .bindPopup(h.name);
+ 
+    markerGroup.addLayer(marker);
+ 
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = h.name;
+    select.appendChild(opt);
+  });
+ 
+  // Auto-fit the map to show all hospital markers nicely on load
+  map.fitBounds(markerGroup.getBounds(), { padding: [40, 40] });
+
+  //const select = document.getElementById('hospitalSelect');
+ 
+  // ---- Fetch real hospitals from Overpass API (OpenStreetMap data) ----
+  /*async function loadHospitals() {
+    document.getElementById('eta').textContent = "Loading hospitals...";
+ 
+    const query = `
+      [out:json][timeout:60];
+      node
+        [amenity=hospital]
+        (23.10,72.55,23.30,72.75);
+      out body;
+    `;
+ 
+  const servers = [
+      'https://overpass.kumi.systems/api/interpreter',
+      'https://overpass-api.de/api/interpreter',
+      'https://overpass.openstreetmap.ru/api/interpreter'
+    ];
+
+    let response = null;
+
+    for (const server of servers) {
+      try {
+        document.getElementById('eta').textContent = `Trying ${server.split('/')[2]}...`;
+        const attempt = await fetch(server, { method: 'POST', body: query });
+        if (attempt.ok) {
+          response = attempt;
+          break;
+        }
+        console.warn(`${server} returned ${attempt.status}, trying next mirror...`);
+      } catch (e) {
+        console.warn(`${server} failed entirely, trying next mirror...`, e);
+      }
+    }
+
+    if (!response) {
+      throw new Error('All Overpass mirrors failed or timed out.');
+    }
+
+    try {
+      const data = await response.json();
+ 
+      // Reshape Overpass's format into { name, lat, lng } to match the rest of the code
+      hospitals = data.elements
+        .filter(el => el.tags && el.tags.name) // skip entries with no name tag
+        .map(el => ({
+          name: el.tags.name,
+          lat: el.lat,
+          lng: el.lon
+        }));
+ 
+      if (hospitals.length === 0) {
+        document.getElementById('eta').textContent = "No hospitals found in this area.";
+        return;
+      }
+ 
+      // ---- Add hospital markers + populate dropdown (same logic as before) ----
+      hospitals.forEach((h, i) => {
+        L.marker([h.lat, h.lng], { icon: hospitalIcon })
+          .addTo(map)
+          .bindPopup(h.name);
+ 
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = h.name;
+        select.appendChild(opt);
+      });
+ 
+      document.getElementById('eta').textContent = `Loaded ${hospitals.length} hospitals.`;
+ 
+    } catch (err) {
+      document.getElementById('eta').textContent = "Error loading hospitals.";
+      console.error(err);
+    }
+  }
+ 
+  // Run it as soon as the page loads
+  //loadHospitals();
+*/
+
+  // ---- Route drawing using public OSRM demo server ----
+  let routeLayer = null;
+ 
+  function getDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; // Earth radius in km
+
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+
+    const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(lat1 * Math.PI / 180) *
+        Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) ** 2;
+
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+ /* async function autoSelectNearestHospital() {
+  if (hospitals.length === 0) return;
+
+  document.getElementById("eta").textContent =
+      "Finding nearest hospital...";
+
+  let bestIndex = -1;
+  let shortestDuration = Infinity;
+
+
+
+  for (let i = 0; i < hospitals.length; i++) {
+
+    const h = hospitals[i];
+
+    const url =
+      `https://router.project-osrm.org/route/v1/driving/` +
+      `${ambulance.lng},${ambulance.lat};` +
+      `${h.lng},${h.lat}?overview=false`;
+
+    try {
+
+      const res = await fetch(url);
+      const data = await res.json();
+
+      if (data.routes && data.routes.length > 0) {
+
+        const distance = data.routes[0].duration;
+
+        if (duration < shortestDuration) {
+          shortestDuration = duration;
+          bestIndex = i;
+        }
+
+      }
+
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  if (bestIndex !== -1) {
+      select.value = bestIndex;
+      drawRoute();
+  }
+}*/
+
+async function autoSelectNearestHospital() {
+
+    if (hospitals.length === 0) return;
+
+    document.getElementById("eta").textContent =
+        "Finding nearest hospital...";
+
+    // Step 1: Calculate straight-line distance
+    const candidates = hospitals
+        .map((h, index) => ({
+            hospital: h,
+            index: index,
+            distance: getDistance(
+                ambulance.lat,
+                ambulance.lng,
+                h.lat,
+                h.lng
+            )
+        }))
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, 5); // Only check the nearest 5 hospitals
+
+    let bestIndex = -1;
+    let shortestDuration = Infinity;
+
+    // Step 2: Check driving time for only those 5
+    for (const candidate of candidates) {
+
+        const h = candidate.hospital;
+
+        const url =
+            `https://router.project-osrm.org/route/v1/driving/` +
+            `${ambulance.lng},${ambulance.lat};` +
+            `${h.lng},${h.lat}?overview=false`;
+
+        try {
+
+            const res = await fetch(url);
+            const data = await res.json();
+
+            if (data.routes && data.routes.length > 0) {
+
+                const duration = data.routes[0].duration;
+
+                if (duration < shortestDuration) {
+                    shortestDuration = duration;
+                    bestIndex = candidate.index;
+                }
+            }
+
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    if (bestIndex !== -1) {
+        select.value = bestIndex;
+        drawRoute();
+    }
+}
+
+  async function drawRoute() {
+    const hospital = hospitals[select.value];
+    const url = `https://router.project-osrm.org/route/v1/driving/${ambulance.lng},${ambulance.lat};${hospital.lng},${hospital.lat}?overview=full&geometries=geojson`;
+ 
+    document.getElementById('eta').textContent = "Calculating route...";
+ 
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+ 
+      if (!data.routes || data.routes.length === 0) {
+        document.getElementById('eta').textContent = "No route found.";
+        return;
+      }
+ 
+      const route = data.routes[0];
+      const coords = route.geometry.coordinates.map(c => [c[1], c[0]]); // OSRM gives [lng,lat], Leaflet wants [lat,lng]
+ 
+      if (routeLayer) map.removeLayer(routeLayer);
+      routeLayer = L.polyline(coords, { color: 'green', weight: 6, opacity: 0.85 }).addTo(map);
+      map.fitBounds(routeLayer.getBounds(), { padding: [40, 40] });
+ 
+      const minutes = Math.round(route.duration / 60);
+      const km = (route.distance / 1000).toFixed(1);
+      document.getElementById('eta').textContent = `ETA: ${minutes} min | Distance: ${km} km`;
+ 
+    } catch (err) {
+      document.getElementById('eta').textContent = "Error fetching route.";
+      console.error(err);
+
+      // Network/OSRM failed — fall back to a straight-line estimate
+      if (routeLayer) map.removeLayer(routeLayer);
+
+      routeLayer = L.polyline(
+        [[ambulance.lat, ambulance.lng], [hospital.lat, hospital.lng]],
+        { color: 'red', weight: 4, opacity: 0.7, dashArray: '10, 10' }
+      ).addTo(map);
+
+      map.fitBounds(routeLayer.getBounds(), { padding: [40, 40] });
+
+      const straightLineKm = getDistance(ambulance.lat, ambulance.lng, hospital.lat, hospital.lng).toFixed(1);
+      document.getElementById('eta').textContent =
+        `⚠️ Live routing unavailable. Approx. straight-line distance: ${straightLineKm} km`;
+    }
+  }
+  function recenterOnAmbulance() {
+      map.setView([ambulance.lat, ambulance.lng], 15);
+  }
+</script>
+ 
+</body>
+</html>
